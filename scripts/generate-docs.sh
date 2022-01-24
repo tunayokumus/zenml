@@ -45,14 +45,14 @@ python docs/mkdocstrings_helper.py --path $SRC --output_path docs/mkdocs/
 
 if [ -n "$PUSH" ]; then
   if [ -n "$LATEST" ]; then
-    mike deploy --push --update-aliases --config-file docs/mkdocs.yml $VERSION latest
+    mike deploy --push --update-aliases --branch misc/test_docs --config-file docs/mkdocs.yml $VERSION latest
   else
-    mike deploy --push --update-aliases --config-file docs/mkdocs.yml $VERSION
+    mike deploy --push --update-aliases --branch misc/test_docs --config-file docs/mkdocs.yml $VERSION
   fi
 else
   if [ -n "$LATEST" ]; then
-    mike deploy --update-aliases --config-file docs/mkdocs.yml $VERSION latest
+    mike deploy --update-aliases --branch misc/test_docs --config-file docs/mkdocs.yml $VERSION latest
   else
-    mike deploy --update-aliases --config-file docs/mkdocs.yml $VERSION
+    mike deploy --update-aliases --branch misc/test_docs --config-file docs/mkdocs.yml $VERSION
   fi
 fi
