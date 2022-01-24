@@ -28,6 +28,7 @@ jobs:
       id: get_version
       run:
         BRANCH=${{github.ref_name}}
+        echo name=VERSION::${BRANCH#release/}
         echo ::set-output name=VERSION::${BRANCH#release/}
 
     - name: Install poetry
