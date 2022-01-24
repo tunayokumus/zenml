@@ -27,7 +27,7 @@ jobs:
     - name: Get the version from the github branch name
       id: get_version
       run:
-        BRANCH="${{github.ref_name}}"
+        BRANCH='${{github.ref_name}}'
         VERSION=${BRANCH#misc/}
         echo ::set-output name=VERSION::VERSION
 
