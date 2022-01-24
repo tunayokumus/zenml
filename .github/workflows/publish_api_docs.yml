@@ -26,7 +26,7 @@ jobs:
 
     - name: Get the version from the github branch name
       id: get_version
-      run:
+      run: |
         BRANCH='${{github.ref_name}}'
         echo ${BRANCH}
         echo ${BRANCH#misc/}
