@@ -18,6 +18,8 @@ jobs:
       ZENML_ANALYTICS_OPT_IN: false
     steps:
     - uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
     - uses: actions/setup-node@v2
       with:
         node-version: '14'
@@ -26,8 +28,9 @@ jobs:
 
     - name: Get the version from the github branch name
       id: get_version
-      run:
-        BRANCH=${{github.ref_name}}
+      run: |
+        BRANCH='${{github.ref_name}}'
+        echo ${BRANCH}
         echo ${BRANCH#misc/}
         echo ::set-output name=VERSION::${BRANCH#misc/}
 
@@ -49,4 +52,4 @@ jobs:
         git config --global user.email 'codemonkey@zenml.io'
 
     - name: Runs docs generation
-      run: poetry run bash scripts/generate-docs.sh -s src/zenml/ -v ${{ steps.get_version.outputs.VERSION }} --push --latest
+      run: poetry run bash scripts/generate-docs.sh -s src/zenml/ --push --latest -v ${{ steps.get_version.outputs.VERSION }}

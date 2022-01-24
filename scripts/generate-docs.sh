@@ -4,6 +4,7 @@ set -x
 SRC="src/zenml/"
 PUSH=""
 LATEST=""
+VERSION=""
 
 msg() {
   echo >&2 -e "${1-}"
