@@ -48,4 +48,4 @@ jobs:
         git config --global user.email 'codemonkey@zenml.io'
 
     - name: Runs docs generation
-      run: poetry run bash scripts/generate-docs.sh -s src/zenml/ -v ${{ steps.get_version.outputs.VERSION }} --push --latest
+      run: poetry run bash scripts/generate-docs.sh -s src/zenml/ --push --latest -v ${{ steps.get_version.outputs.VERSION }}
