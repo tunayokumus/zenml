@@ -6,9 +6,11 @@ on:
       - bugfix/mlflow-test
 
 jobs:
-  main:
+  mlflow-pytest:
     runs-on: windows-latest
     steps:
+      - uses: actions/checkout@v2
+
       - name: Set up Python
         uses: actions/setup-python@v2
         with:
