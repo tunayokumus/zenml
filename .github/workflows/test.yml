@@ -1,0 +1,23 @@
+name: MLFlow pytest
+
+on:
+  push:
+    branches:
+      - bugfix/mlflow-test
+
+jobs:
+  main:
+    runs-on: windows-latest
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest mlflow
+
+      - name: Test
+        run: python -m pytest mlflow_tests
