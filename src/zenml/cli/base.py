@@ -18,10 +18,7 @@ from typing import Optional
 import click
 
 from zenml.cli.cli import cli
-from zenml.cli.utils import confirmation, declare, error
-from zenml.console import console
-from zenml.enums import StorageType
-from zenml.exceptions import InitializationException
+from zenml.cli.utils import confirmation, error, warning
 from zenml.repository import Repository
 
 
@@ -32,8 +29,7 @@ from zenml.repository import Repository
         exists=True, file_okay=False, dir_okay=True, path_type=Path
     ),
 )
-@click.option("--storage-type", type=click.Choice(StorageType.list()))
-def init(path: Optional[Path], storage_type: Optional[StorageType]) -> None:
+def init(path: Optional[Path]) -> None:
     """Initialize ZenML on given path.
 
     Args:
@@ -42,18 +38,12 @@ def init(path: Optional[Path], storage_type: Optional[StorageType]) -> None:
     Raises:
         InitializationException: If the repo is already initialized.
     """
-    if path is None:
-        path = Path.cwd()
-
-    if storage_type is None:
-        storage_type = StorageType.SQLITE_STORAGE
-
-    with console.status(f"Initializing ZenML repository at {path}.\n"):
-        try:
-            Repository.initialize(root=path, storage_type=storage_type)
-            declare(f"ZenML repository initialized at {path}.")
-        except InitializationException as e:
-            error(f"{e}")
+    warning(
+        "The `zenml init` command is deprecated. A global ZenML repository "
+        "is now initialized automatically the first time you run a zenml "
+        "CLI command or run code that imports the zenml.repository module."
+    )
+    Repository()
 
 
 @cli.command("clean")

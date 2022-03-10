@@ -17,7 +17,6 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from zenml.constants import LOCAL_CONFIG_DIRECTORY_NAME
 from zenml.enums import StackComponentType
 from zenml.exceptions import StackComponentExistsError
 from zenml.io import fileio
@@ -36,22 +35,26 @@ from zenml.utils import yaml_utils
 
 logger = get_logger(__name__)
 
+REPOSITORY_DIRECTORY_NAME = ".repo"
+
 
 class LocalStackStore(BaseStackStore):
     def __init__(
         self,
-        base_directory: str,
+        url: str,
         stack_data: Optional[StackStoreModel] = None,
     ) -> None:
         """Initializes a local stack store instance.
 
         Args:
-            base_directory: root directory of the repository to use for
+            url: URL of local directory of the repository to use for
                 stack storage.
             stack_data: optional stack data store object to pre-populate the
                 stack store with.
         """
-        self._root = base_directory
+        self._url = url
+        self._root = self.get_path_from_url(url)
+
         if stack_data is not None:
             self.__store = stack_data
         elif fileio.file_exists(self._store_path()):
@@ -60,12 +63,39 @@ class LocalStackStore(BaseStackStore):
         else:
             self.__store = StackStoreModel.empty_store()
 
+    @staticmethod
+    def get_path_from_url(url: str) -> Optional[Path]:
+        """Get the path from a URL.
+
+        Args:
+            url: The URL to get the path from.
+
+        Returns:
+            The path from the URL.
+        """
+        if not LocalStackStore.is_valid_url(url):
+            raise ValueError(f"Invalid URL for local store: {url}")
+        url = url.replace("file://", "")
+        return Path(url)
+
     # Public interface implementations:
 
     @property
-    def version(self) -> str:
-        """Get the ZenML version."""
-        return self.__store.version
+    def url(self) -> str:
+        """URL of the repository."""
+        return self._url
+
+    @staticmethod
+    def get_local_url(path: str) -> str:
+        """Get a local URL for a given local path."""
+        return f"file://{path}"
+
+    @staticmethod
+    def is_valid_url(url: str) -> bool:
+        """Check if the given url is a valid local path."""
+        url = url.replace("file://", "")
+        path = Path(url)
+        return path.exists() and path.is_dir()
 
     @property
     def active_stack_name(self) -> str:
@@ -260,22 +290,12 @@ class LocalStackStore(BaseStackStore):
         self, component_type: StackComponentType, name: str
     ) -> str:
         """Path to the configuration file of a stack component."""
-        path = self.config_directory / component_type.plural / f"{name}.yaml"
+        path = self._root / component_type.plural / f"{name}.yaml"
         return str(path)
-
-    @property
-    def root(self) -> Path:
-        """The root directory of this repository."""
-        return Path(self._root)
-
-    @property
-    def config_directory(self) -> Path:
-        """The configuration directory of this repository."""
-        return self.root / LOCAL_CONFIG_DIRECTORY_NAME
 
     def _store_path(self) -> str:
         """Path to the repository configuration file."""
-        return str(self.config_directory / "stacks.yaml")
+        return str(self._root / "config.yaml")
 
     def _write_store(self) -> None:
         """Writes the repository configuration file."""

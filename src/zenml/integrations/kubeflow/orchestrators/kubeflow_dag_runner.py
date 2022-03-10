@@ -352,10 +352,7 @@ class KubeflowDagRunner:
 
             from zenml.utils import source_utils
 
-            main_module_file = cast(str, sys.modules["__main__"].__file__)
-            main_module = source_utils.get_module_source_from_file_path(
-                os.path.abspath(main_module_file)
-            )
+            main_module = sys.modules["__main__"].__name__
 
             step_module = component.component_type.split(".")[:-1]
             if step_module[0] == "__main__":

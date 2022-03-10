@@ -20,6 +20,7 @@ import click
 from dateutil import tz
 from rich import box, table
 from rich.text import Text
+from zenml.config.global_config import ConfigProfile
 
 from zenml.console import console
 from zenml.constants import IS_DEBUG_ENV
@@ -214,6 +215,23 @@ def print_stack_component_configuration(
     rich_table.columns[0]._cells = [
         component.upper() for component in rich_table.columns[0]._cells  # type: ignore[union-attr]
     ]
+    console.print(rich_table)
+
+
+def print_profile(profile: ConfigProfile, active: bool, name: str) -> None:
+    """Prints the configuration options of a profile."""
+    profile_title = f"'{name}' profile"
+    if active:
+        profile_title += " (ACTIVE)"
+    rich_table = table.Table(
+        box=box.HEAVY_EDGE,
+        title=profile_title,
+        show_lines=True,
+    )
+    rich_table.add_column("NAME")
+    rich_table.add_column("STORE TYPE")
+    rich_table.add_column("URL")
+    rich_table.add_row(name, profile.store_type, profile.service_url)
     console.print(rich_table)
 
 

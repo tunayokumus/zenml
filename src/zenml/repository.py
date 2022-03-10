@@ -12,26 +12,20 @@
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
 import base64
-import json
 import os
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Type, cast
 
 import yaml
-from pydantic import BaseModel, ValidationError
 
-import zenml
+from zenml.config.global_config import GlobalConfig, ConfigProfile
 from zenml.constants import (
     ENV_ZENML_REPOSITORY_PATH,
-    LOCAL_CONFIG_DIRECTORY_NAME,
+    LOCAL_LEGACY_CONFIG_DIRECTORY_NAME,
 )
-from zenml.enums import StackComponentFlavor, StackComponentType, StorageType
+from zenml.enums import StackComponentFlavor, StackComponentType, StoreType
 from zenml.environment import Environment
-from zenml.exceptions import (
-    ForbiddenRepositoryAccessError,
-    InitializationException,
-    RepositoryNotFoundError,
-)
+from zenml.exceptions import ForbiddenRepositoryAccessError
 from zenml.io import fileio
 from zenml.logger import get_logger
 from zenml.post_execution import PipelineView
@@ -40,53 +34,36 @@ from zenml.stack_stores import BaseStackStore, LocalStackStore, SqlStackStore
 from zenml.stack_stores.models import (
     StackComponentConfiguration,
     StackConfiguration,
-    StackStoreModel,
     StackWrapper,
 )
-from zenml.utils import yaml_utils
 from zenml.utils.analytics_utils import AnalyticsEvent, track, track_event
 
 logger = get_logger(__name__)
 
 
-class RepositoryConfiguration(BaseModel):
-    """Pydantic object used for serializing repository configuration options.
+class RepositoryMetaClass(type):
+    """Repository singleton metaclass.
 
-    Attributes:
-        version: Version of ZenML that was used to create the repository.
-        storage_type: Type of Storage backend to persist the repository.
-        active_stack_name: Optional name of the active stack.
+    This metaclass is used to enforce a singleton instance of the Repository
+    class with the following additional properties:
+
+    * the singleton Repository instance is created on first access to reflect
+    the currently active global configuration profile.
+    * the global Repository is initialized automatically on import with the
+    default configuration (local stack) if no stack is configured yet.
+    * the Repository mustn't be accessed from within pipeline steps
+
     """
 
-    version: str
-    storage_type: StorageType
+    def __init__(cls, *args: Any, **kwargs: Any) -> None:
+        """Initialize the Repository class."""
+        super().__init__(*args, **kwargs)
+        cls.__global_repository: Optional["Repository"] = None
 
-
-class Repository:
-    """ZenML repository class.
-
-    ZenML repositories store configuration options for ZenML stacks as well as
-    their components.
-    """
-
-    def __init__(
-        self,
-        root: Optional[Path] = None,
-        storage_type: StorageType = StorageType.SQLITE_STORAGE,
-    ):
-        """Initializes a repository instance.
-
-        Args:
-            root: Optional root directory of the repository. If no path is
-                given, this function tries to find the repository using the
-                environment variable `ZENML_REPOSITORY_PATH` (if set) and
-                recursively searching in the parent directories of the current
-                working directory.
-            storage_type: Optionally specify how to persist stacks. Valid
-                options: SQLITE_STORAGE, YAML_STORAGE
+    def __call__(cls, *args: Any, **kwargs: Any) -> "Repository":
+        """Create or return the global Repository instance.
 
         Raises:
-            RepositoryNotFoundError: If no ZenML repository directory is found.
             ForbiddenRepositoryAccessError: If trying to create a `Repository`
                 instance while a ZenML step is being executed.
         """
@@ -98,122 +75,103 @@ class Repository:
                 url="https://docs.zenml.io/features/step-fixtures#using-the-stepcontext",
             )
 
-        self._root = Repository.find_repository(root)
-        logger.debug(" + Initializing %s repo at %s", storage_type, self._root)
-
-        # load the repository configuration file if it exists, otherwise use
-        # an empty configuration as default
-        config_path = self._config_path()
-        if fileio.file_exists(config_path):
-            config_dict = yaml_utils.read_yaml(config_path)
-            try:
-                self.__config = RepositoryConfiguration.parse_obj(config_dict)
-                stack_data = None
-                logger.debug("Found new_style repository, load from disk.")
-            except ValidationError:
-                # if we have an old style repository in place already, split
-                # config and stack store out into separate entities:
-                logger.info(
-                    "Found old style repository, converting to "
-                    "minimal repository config with separate stack store file."
-                )
-                stack_data = StackStoreModel.parse_obj(config_dict)
-                self.__config = RepositoryConfiguration(
-                    version=stack_data.version,
-                    storage_type=storage_type,
-                )
-                self._write_config()
-        else:
-            stack_data = None
-            logger.debug(
-                "No repo found, creating new repository configuration."
+        if not cls.__global_repository:
+            cls.__global_repository = cast(
+                "Repository", super().__call__(*args, **kwargs)
             )
-            self.__config = RepositoryConfiguration(
-                version=zenml.__version__, storage_type=storage_type
-            )
+            # Initialize the global repository with the default stack
+            # configuration if no stack has been configured yet
+            if cls.__global_repository.is_empty:
+                cls.__global_repository._initialize()
 
-        if self.version != zenml.__version__:
+        return cls.__global_repository
+
+
+class Repository(metaclass=RepositoryMetaClass):
+    """ZenML repository class.
+
+    The ZenML repository manages configuration options for ZenML stacks as well
+    as their components.
+    """
+
+    def __init__(self):
+        """Initializes the global repository instance."""
+
+        legacy_location = Repository._find_legacy_repository()
+        if legacy_location:
             logger.warning(
-                "This ZenML repository was created with a different version "
-                "of ZenML (Repository version: %s, current ZenML version: %s). "
-                "In case you encounter any errors, please delete and "
-                "reinitialize this repository.",
-                self.version,
-                zenml.__version__,
+                "A ZenML repository folder was found at %s. \n"
+                "Support for legacy .zen folders has been deprecated and will "
+                "be removed in a future ZenML release. If you still need to "
+                "use the stacks configured in this repository, please add them "
+                "manually to the global ZenML repository, then delete the .zen "
+                "folder.",
+                legacy_location,
             )
 
-        self.stack_store: BaseStackStore
-        if self.__config.storage_type == StorageType.YAML_STORAGE:
-            self.stack_store = LocalStackStore(
-                base_directory=str(self.root), stack_data=stack_data
-            )
-        elif self.__config.storage_type == StorageType.SQLITE_STORAGE:
-            self.stack_store = SqlStackStore(
-                f"sqlite:///{self.config_directory / 'stackstore.db'}"
-            )
-        else:
-            # TODO[HIGH]: implement other stack store backends (rest, mysql?)
-            raise ValueError(
-                f"Unsupported StackStore StorageType {self.__config.storage_type.value}"
-            )
-
-    def _config_path(self) -> str:
-        """Path to the repository configuration file."""
-        return str(self.config_directory / "config.yaml")
-
-    def _write_config(self) -> None:
-        """Writes the repository configuration file."""
-        config_dict = json.loads(self.__config.json())
-        yaml_utils.write_yaml(self._config_path(), config_dict)
+        self.stack_store: BaseStackStore = self.create_store(
+            GlobalConfig().active_profile
+        )
 
     @staticmethod
+    def get_store_class(type: StoreType) -> Type[BaseStackStore]:
+        """Returns the class of the given store type."""
+        return {
+            StoreType.LOCAL: LocalStackStore,
+            StoreType.SQL: SqlStackStore,
+        }[type]
+
+    @staticmethod
+    def create_store(profile: ConfigProfile) -> BaseStackStore:
+        """Create the repository persistance back-end store from a configuration
+        profile.
+
+        If the configuration profile doesn't specify all necessary configuration
+        options (e.g. the type or URL), a default configuration will be used.
+
+        Args:
+            profile: The configuration profile to use for persisting the
+                repository information.
+
+        Returns:
+            The initialized repository store.
+        """
+        store_class = Repository.get_store_class(profile.store_type)
+
+        if not profile.service_url:
+            profile.service_url = store_class.get_local_url(profile.config_path)
+
+        if store_class.is_valid_url(profile.service_url):
+            return store_class(profile.service_url)
+
+        raise ValueError(
+            f"Invalid URL for store type `{profile.store_type.value}`: "
+            f"{profile.service_url}"
+        )
+
     @track(event=AnalyticsEvent.INITIALIZE_REPO)
-    def initialize(
-        root: Path = Path.cwd(),
-        storage_type: StorageType = StorageType.SQLITE_STORAGE,
-    ) -> None:
-        """Initializes a new ZenML repository at the given path.
+    def _initialize(self) -> None:
+        """Initializes the global ZenML repository.
 
         The newly created repository will contain a single stack with a local
         orchestrator, a local artifact store and a local SQLite metadata store.
-
-        Args:
-            root: The root directory where the repository should be created.
-
-        Raises:
-            InitializationException: If the root directory already contains a
-                ZenML repository.
         """
-        logger.debug("Initializing new repository at path %s.", root)
-        if Repository.is_repository_directory(root):
-            raise InitializationException(
-                f"Found existing ZenML repository at path '{root}'."
-            )
-
-        config_directory = str(root / LOCAL_CONFIG_DIRECTORY_NAME)
-        fileio.create_dir_recursive_if_not_exists(config_directory)
+        logger.debug("Initializing repository...")
 
         # register and activate a local stack
-        repo = Repository(root=root, storage_type=storage_type)
         stack = Stack.default_local_stack()
-        repo.register_stack(stack)
-        repo.activate_stack(stack.name)
-        repo._write_config()
+        self.register_stack(stack)
+        self.activate_stack(stack.name)
+
+    @property
+    def is_empty(self) -> bool:
+        """Check if the repository is empty."""
+        return not self.stacks
 
     @property
     def version(self) -> str:
         """The version of the repository."""
         return self.__config.version
-
-    @property
-    def root(self) -> Path:
-        """The root directory of this repository."""
-        return self._root
-
-    @property
-    def config_directory(self) -> Path:
-        """The configuration directory of this repository."""
-        return self.root / LOCAL_CONFIG_DIRECTORY_NAME
 
     @property
     def stacks(self) -> List[Stack]:
@@ -423,70 +381,54 @@ class Repository:
         return metadata_store.get_pipeline(pipeline_name)
 
     @staticmethod
-    def is_repository_directory(path: Path) -> bool:
-        """Checks whether a ZenML repository exists at the given path."""
-        config_dir = path / LOCAL_CONFIG_DIRECTORY_NAME
+    def _is_legacy_repository_directory(path: Path) -> bool:
+        """Checks whether a legacy ZenML repository exists at the given path."""
+        config_dir = path / LOCAL_LEGACY_CONFIG_DIRECTORY_NAME
         return fileio.is_dir(str(config_dir))
 
     @staticmethod
-    def find_repository(path: Optional[Path] = None) -> Path:
-        """Finds path of a ZenML repository directory.
+    def _find_legacy_repository() -> Optional[Path]:
+        """Search for a legacy ZenML repository directory.
 
-        Args:
-            path: Optional path to look for the repository. If no path is
-                given, this function tries to find the repository using the
-                environment variable `ZENML_REPOSITORY_PATH` (if set) and
-                recursively searching in the parent directories of the current
-                working directory.
+        Tthis function tries to find the repository using the
+        environment variable `ZENML_REPOSITORY_PATH` (if set) and
+        recursively searching in the parent directories of the current
+        working directory.
 
         Returns:
-            Absolute path to a ZenML repository directory.
-
-        Raises:
-            RepositoryNotFoundError: If no ZenML repository is found.
+            Absolute path to a legacy ZenML repository directory or None if no
+            legacy repository was found.
         """
-        if not path:
-            # try to get path from the environment variable
-            env_var_path = os.getenv(ENV_ZENML_REPOSITORY_PATH)
-            if env_var_path:
-                path = Path(env_var_path)
-
-        if path:
-            # explicit path via parameter or environment variable, don't search
+        # try to get path from the environment variable
+        env_var_path = os.getenv(ENV_ZENML_REPOSITORY_PATH)
+        if env_var_path:
+            path = Path(env_var_path)
+            # explicit path via environment variable, don't search
             # parent directories
             search_parent_directories = False
-            error_message = (
-                f"Unable to find ZenML repository at path '{path}'. Make sure "
-                f"to create a ZenML repository by calling `zenml init` when "
-                f"specifying an explicit repository path in code or via the "
-                f"environment variable '{ENV_ZENML_REPOSITORY_PATH}'."
-            )
         else:
             # try to find the repo in the parent directories of the current
             # working directory
             path = Path.cwd()
             search_parent_directories = True
-            error_message = (
-                f"Unable to find ZenML repository in your current working "
-                f"directory ({path}) or any parent directories. If you "
-                f"want to use an existing repository which is in a different "
-                f"location, set the environment variable "
-                f"'{ENV_ZENML_REPOSITORY_PATH}'. If you want to create a new "
-                f"repository, run `zenml init`."
-            )
 
-        def _find_repo_helper(path_: Path) -> Path:
+        def _find_repo_helper(path_: Path) -> Optional[Path]:
             """Helper function to recursively search parent directories for a
             ZenML repository."""
-            if Repository.is_repository_directory(path_):
+            if Repository._is_legacy_repository_directory(path_):
                 return path_
 
             if not search_parent_directories or fileio.is_root(str(path_)):
-                raise RepositoryNotFoundError(error_message)
+                return None
 
             return _find_repo_helper(path_.parent)
 
-        return _find_repo_helper(path).resolve()
+        legacy_repo_path = _find_repo_helper(path)
+
+        if legacy_repo_path:
+            return legacy_repo_path.resolve()
+
+        return None
 
     def _component_from_configuration(
         self, conf: StackComponentConfiguration

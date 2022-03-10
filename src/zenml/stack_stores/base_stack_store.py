@@ -36,8 +36,18 @@ class BaseStackStore(ABC):
 
     @property
     @abstractmethod
-    def version(self) -> str:
-        """Get the ZenML version."""
+    def url(self) -> str:
+        """Get the repository URL."""
+
+    @staticmethod
+    @abstractmethod
+    def get_local_url(path: str) -> str:
+        """Get a local URL for a given local path."""
+
+    @staticmethod
+    @abstractmethod
+    def is_valid_url(url: str) -> bool:
+        """Check if the given url is valid."""
 
     @property
     @abstractmethod

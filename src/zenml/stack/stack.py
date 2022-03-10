@@ -162,7 +162,7 @@ class Stack:
 
         artifact_store_uuid = uuid.uuid4()
         artifact_store_path = os.path.join(
-            GlobalConfig.config_directory(),
+            GlobalConfig().config_path,
             "local_stores",
             str(artifact_store_uuid),
         )

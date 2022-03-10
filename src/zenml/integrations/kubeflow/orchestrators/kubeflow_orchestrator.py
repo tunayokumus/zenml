@@ -14,6 +14,7 @@
 
 import os
 import re
+import sys
 from typing import TYPE_CHECKING, Any, Optional
 
 import kfp
@@ -41,6 +42,7 @@ from zenml.stack.stack_component_class_registry import (
     register_stack_component_class,
 )
 from zenml.utils import networking_utils
+from zenml.utils.source_utils import get_root_path_from_module
 
 if TYPE_CHECKING:
     from zenml.pipelines.base_pipeline import BasePipeline
@@ -144,8 +146,9 @@ class KubeflowOrchestrator(BaseOrchestrator):
 
         logger.debug("Kubeflow docker container requirements: %s", requirements)
 
+        main_module = sys.modules["__main__"]
         build_docker_image(
-            build_context_path=str(Repository().root),
+            build_context_path=get_root_path_from_module(main_module),
             image_name=image_name,
             dockerignore_path=pipeline.dockerignore_file,
             requirements=requirements,

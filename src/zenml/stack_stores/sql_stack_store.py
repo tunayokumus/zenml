@@ -20,6 +20,8 @@
 import datetime as dt
 from typing import Dict, List, Optional, Tuple
 
+from sqlalchemy.engine.url import make_url
+from sqlalchemy.exc import ArgumentError
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 from zenml import __version__
@@ -74,7 +76,6 @@ class ZenConfig(SQLModel, table=True):
     create_time: Optional[dt.datetime] = Field(
         default_factory=dt.datetime.now, primary_key=True
     )
-    version: str
     active_stack: Optional[str]
 
 
@@ -89,6 +90,7 @@ class SqlStackStore(BaseStackStore):
         """
 
         logger.debug("Initializing SqlStackStore at %s", url)
+        self._url = url
         self.engine = create_engine(url, *args, **kwargs)
         SQLModel.metadata.create_all(self.engine)
         with Session(self.engine) as session:
@@ -101,11 +103,25 @@ class SqlStackStore(BaseStackStore):
     # Public interface implementations:
 
     @property
-    def version(self) -> str:
-        """The version of the repository."""
-        with Session(self.engine) as session:
-            conf = session.exec(select(ZenConfig)).one()
-        return conf.version
+    def url(self) -> str:
+        """URL of the repository."""
+        return self._url
+
+    @staticmethod
+    def get_local_url(path: str) -> str:
+        """Get a local SQL url for a given local path."""
+        return f"sqlite:///{path}/zenml.db"
+
+    @staticmethod
+    def is_valid_url(url: str) -> bool:
+        """Check if the given url is a valid SQL url."""
+        try:
+            url = make_url(url)
+        except Exception:
+            logger.debug("Invalid SQL URL: %s", url)
+            return False
+
+        return True
 
     @property
     def active_stack_name(self) -> str:
