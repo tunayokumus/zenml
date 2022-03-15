@@ -47,9 +47,7 @@ def register_secret(name: str, secret_value: str) -> None:
 def get_secret(name: str) -> None:
     """Get a secret, given its name."""
     with console.status(f"Getting secret `{name}`..."):
-        secret_value = (
-            "my-secret-value"  # TODO: [HIGH] replace with real value
-        )
+        secret_value = "my-secret-value"  # TODO: [HIGH] replace with real value
         console.print(f"Secret for `{name.upper()}` is `{secret_value}`.")
 
 
